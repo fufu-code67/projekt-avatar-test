@@ -46,12 +46,75 @@
             pointer-events: none;
             z-index: 10;
         }
+        /* ── Equip Panel ─────────────────────────────── */
+        #equip-panel {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 20;
+        }
+        #equip-panel button {
+            background: rgba(20, 30, 60, 0.85);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            color: #ccc;
+            padding: 12px 18px;
+            font-size: 15px;
+            cursor: pointer;
+            transition: all 0.25s;
+            backdrop-filter: blur(8px);
+            text-align: left;
+            white-space: nowrap;
+            min-width: 160px;
+        }
+        #equip-panel button:hover {
+            background: rgba(60, 80, 140, 0.7);
+            border-color: rgba(255,255,255,0.35);
+            color: #fff;
+            transform: translateX(-4px);
+        }
+        #equip-panel button.active {
+            background: rgba(100, 140, 220, 0.6);
+            border-color: #6699ff;
+            color: #fff;
+            box-shadow: 0 0 15px rgba(100,140,255,0.3);
+        }
+        #equip-panel button.no-hat {
+            border-style: dashed;
+            opacity: 0.6;
+            font-size: 13px;
+            padding: 8px 18px;
+        }
+        #equip-panel button.no-hat:hover {
+            opacity: 1;
+        }
+        #equip-label {
+            color: #889;
+            font-size: 11px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <div id="info">Projekt Avatar Test</div>
     <div id="status">Lade Avatar…</div>
     <div id="hint">🖱️ Drehen | 🖱️🖱️ Zoomen | 🖱️🖱️🖱️ Verschieben</div>
+
+    <!-- Equip Panel -->
+    <div id="equip-panel">
+        <div id="equip-label">🎩 Hüte</div>
+        <button onclick="equipHat('assets/hats/wizard_hat.glb', this)" data-hat="wizard">🧙 Zauberhut</button>
+        <button onclick="equipHat('assets/hats/knight_helmet.glb', this)" data-hat="knight">⚔️ Ritterhelm</button>
+        <button onclick="equipHat('assets/hats/gold_crown.glb', this)" data-hat="crown">👑 Goldkrone</button>
+        <button onclick="unequipHat(this)" class="no-hat">✕ Kein Hut</button>
+    </div>
 
     <script type="importmap">
     {
@@ -69,6 +132,8 @@
 
         const statusEl = document.getElementById('status');
         const hintEl = document.getElementById('hint');
+        let baseModel = null;   // Reference to loaded avatar
+        let currentHat = null;  // Currently equipped hat mesh
 
         // Scene
         const scene = new THREE.Scene();
@@ -169,6 +234,8 @@
                 
                 scene.add(model);
                 
+                baseModel = model;  // Store for hat positioning
+
                 const meshCount = gltf.parser.json.meshes?.length || '?';
                 const vertCount = size.x > 0 ? 'geladen' : 'geladen';
                 statusEl.textContent = `✓ Avatar ${vertCount} — ${meshCount} Mesh(es)`;
@@ -188,6 +255,71 @@
                 console.error(error);
             }
         );
+
+        // ── Equip System ─────────────────────────────────
+        const hatLoader = new GLTFLoader();
+        
+        window.equipHat = function(path, btn) {
+            if (!baseModel) {
+                statusEl.textContent = '⏳ Warte auf Avatar…';
+                return;
+            }
+            // Remove old hat
+            if (currentHat) {
+                scene.remove(currentHat);
+                currentHat = null;
+            }
+            // Update button states
+            document.querySelectorAll('#equip-panel button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.querySelector('#equip-panel button.no-hat')?.classList.remove('active');
+            
+            statusEl.textContent = 'Lade Hut…';
+            hatLoader.load(path, (gltf) => {
+                const hat = gltf.scene;
+                
+                // Get base model bounding box for head position
+                const baseBox = new THREE.Box3().setFromObject(baseModel);
+                const baseTop = baseBox.max.y;
+                
+                // Hat should sit on top of head (slightly above)
+                hat.position.set(0, baseTop + 0.02, 0);
+                
+                // Scale hat to ~15% of avatar height
+                const baseHeight = baseBox.max.y - baseBox.min.y;
+                const hatBox = new THREE.Box3().setFromObject(hat);
+                const hatHeight = hatBox.max.y - hatBox.min.y;
+                if (hatHeight > 0) {
+                    const targetHatHeight = baseHeight * 0.18;
+                    hat.scale.setScalar(targetHatHeight / hatHeight);
+                    hat.position.y = baseTop + 0.01;
+                }
+                
+                hat.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                
+                scene.add(hat);
+                currentHat = hat;
+                statusEl.textContent = '✓ Hut ausgerüstet';
+            }, undefined, (err) => {
+                statusEl.textContent = '✗ Hut nicht gefunden';
+                console.error(err);
+            });
+        };
+        
+        window.unequipHat = function(btn) {
+            if (currentHat) {
+                scene.remove(currentHat);
+                currentHat = null;
+            }
+            document.querySelectorAll('#equip-panel button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            statusEl.textContent = '✓ Kein Hut';
+        };
 
         // Render loop
         function animate() {
