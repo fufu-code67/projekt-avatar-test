@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+<style>html,body{margin:0;background:#1a1a2e;overflow:hidden}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const qs = new URLSearchParams(location.search);
+const topUrl = qs.get('top') || 'none';
+const pantsUrl = qs.get('pants') || 'none';
+const hatUrl = qs.get('hat') || 'none';
+const camY = parseFloat(qs.get('camY') || '0.18');
+const topFace = parseFloat(qs.get('topFace') || '0');
+const pantsFace = parseFloat(qs.get('pantsFace') || '0');
+const hatFace = parseFloat(qs.get('hatFace') || '0');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+const camera = new THREE.PerspectiveCamera(45, 1080/1350, 0.01, 100);
+const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+renderer.setSize(1080, 1350);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, .6));
+const key = new THREE.DirectionalLight(0xfff5e0, 2); key.position.set(3,5,4); scene.add(key);
+const rim = new THREE.DirectionalLight(0x8b5cf6, 1.2); rim.position.set(-4,3,-3); scene.add(rim);
+const fill = new THREE.DirectionalLight(0xffffff, .8); fill.position.set(-2,-1,3); scene.add(fill);
+const loader = new GLTFLoader();
+const L = (url) => new Promise((res,rej)=>loader.load(url, g=>res(g.scene), undefined, rej));
+
+const avatar = await L('assets/avatar-3d.glb');
+scene.add(avatar);
+const box = new THREE.Box3().setFromObject(avatar);
+const c = box.getCenter(new THREE.Vector3());
+const s = box.getSize(new THREE.Vector3());
+avatar.position.sub(c);
+camera.position.set(0, camY, s.z*2.6 + 1.15);
+camera.lookAt(0, 0, 0);
+// Avatar faces -X (seen in first render). Rotate scene so front faces the camera (+Z).
+const camAngle = parseFloat(qs.get('camAngle') || '0');
+scene.rotation.y = camAngle;
+
+async function equip(url, yMin, yMax, zPush, zFace){
+  const m = await L(url);
+  const b = new THREE.Box3().setFromObject(m);
+  const size = b.getSize(new THREE.Vector3());
+  const ctr = b.getCenter(new THREE.Vector3());
+  const targetH = (yMax - yMin) * s.y;
+  const targetW = 1.02 * Math.max(s.x, size.x*0.55);
+  const sc = Math.min(targetW/size.x, targetH/size.y, 1.35*s.z/size.z);
+  m.scale.setScalar(sc);
+  // zFace: which local z of the asset should end up facing the camera (+Z after scene rotation)
+  m.rotation.y = (zFace === undefined) ? 0 : (zFace * Math.PI);
+  // rotate the local bbox accordingly by recomputing after rotation
+  m.updateMatrixWorld(true);
+  const b2 = new THREE.Box3().setFromObject(m);
+  const s2 = b2.getSize(new THREE.Vector3());
+  const c2 = b2.getCenter(new THREE.Vector3());
+  const sc2 = Math.min(targetW/s2.x, targetH/s2.y, 1.35*s.z/s2.z);
+  m.scale.multiplyScalar(sc2/sc);
+  m.updateMatrixWorld(true);
+  const b3 = new THREE.Box3().setFromObject(m);
+  const c3 = b3.getCenter(new THREE.Vector3());
+  m.position.set(-c3.x, (yMin*s.y) - b3.min.y + 0.005, -c3.z + zPush);
+  scene.add(m);
+}
+if (pantsUrl !== 'none') await equip(pantsUrl, -0.505, -0.02, 0.0, pantsFace);
+if (topUrl !== 'none') await equip(topUrl, 0.02, 0.56, 0.045, topFace);
+if (hatUrl !== 'none') await equipHat(hatUrl);
+async function equipHat(url){
+  const m = await L(url);
+  m.rotation.y = hatFace * Math.PI;
+  m.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(m);
+  const size = b.getSize(new THREE.Vector3());
+  const ctr = b.getCenter(new THREE.Vector3());
+  // head width ~ 0.55*avatar x; hat should be ~1.6x head width
+  const targetW = 1.6 * s.x;
+  const targetH = 0.17 * s.y;
+  const sc = Math.min(targetW/size.x, targetH/size.y);
+  m.scale.setScalar(sc);
+  m.updateMatrixWorld(true);
+  const b2 = new THREE.Box3().setFromObject(m);
+  const c2 = b2.getCenter(new THREE.Vector3());
+  const headTop = 0.47 * s.y;  // head top in world (avatar max ~0.5)
+  m.position.set(-c2.x, headTop - b2.min.y + 0.004, -c2.z + 0.02);
+  scene.add(m);
+}
+window.__camAngle = qs.get('camAngle') || '0';
+
+function loop(){ requestAnimationFrame(loop); renderer.render(scene, camera); }
+loop();
+document.title = 'RENDERED';
+</script></body></html>

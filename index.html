@@ -114,6 +114,16 @@
         <button onclick="equipHat('assets/hats/knight_helmet.glb', this)" data-hat="knight">⚔️ Ritterhelm</button>
         <button onclick="equipHat('assets/hats/gold_crown.glb', this)" data-hat="crown">👑 Goldkrone</button>
         <button onclick="unequipHat(this)" class="no-hat">✕ Kein Hut</button>
+        <div id="equip-label" style="margin-top:12px;">👕 Oberteile</div>
+        <button onclick="equipTop('assets/tops/tunic_wizard.glb', this, 0)">🧙 Zauberer-Tunika</button>
+        <button onclick="equipTop('assets/tops/breastplate.glb', this, 1)">🛡️ Ritter-Harnisch</button>
+        <button onclick="equipTop('assets/tops/linen_shirt.glb', this, 0)">👕 Leinenhemd</button>
+        <button onclick="unequipTop(this)" class="no-hat">✕ Kein Oberteil</button>
+        <div id="equip-label" style="margin-top:12px;">👖 Hosen</div>
+        <button onclick="equipPants('assets/pants/ball_hose2.glb', this, 0)">🧝 Ballhose</button>
+        <button onclick="equipPants('assets/pants/stoffhose.glb', this, 0)">🩳 Stoffhose</button>
+        <button onclick="equipPants('assets/pants/jeans2.glb', this, 0)">👖 Jeans</button>
+        <button onclick="unequipPants(this)" class="no-hat">✕ Keine Hose</button>
     </div>
 
     <script type="importmap">
@@ -134,6 +144,15 @@
         const hintEl = document.getElementById('hint');
         let baseModel = null;   // Reference to loaded avatar
         let currentHat = null;  // Currently equipped hat mesh
+        let currentTop = null;  // Currently equipped top mesh
+        let currentPants = null; // Currently equipped pants mesh
+        // Per-asset yaw so the garment front faces the avatar's front.
+        // Units: half-turns (0, 0.5, 1...). Calibrated from Tripo outputs.
+        const TOP_FACE = { 'assets/tops/tunic_wizard.glb': 0, 'assets/tops/breastplate.glb': 1, 'assets/tops/linen_shirt.glb': 0 };
+        const PANTS_FACE = { 'assets/pants/ball_hose2.glb': 0, 'assets/pants/stoffhose.glb': 0, 'assets/pants/jeans2.glb': 0 };
+        // Garment vertical anchors, as fraction of avatar height (0 = feet, 1 = head top)
+        const TOP_RANGE = { min: 0.52, max: 1.06 };
+        const PANTS_RANGE = { min: 0.0, max: 0.56 };
 
         // Scene
         const scene = new THREE.Scene();
@@ -319,6 +338,75 @@
             document.querySelectorAll('#equip-panel button').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             statusEl.textContent = '✓ Kein Hut';
+        };
+
+        // ── Tops / Pants equip (bbox-fit like hats, with per-asset facing) ──
+        function equipGarment(path, btn, faceMap, range, currentRef, label) {
+            if (!baseModel) { statusEl.textContent = '⏳ Warte auf Avatar…'; return; }
+            const loader = new GLTFLoader();
+            statusEl.textContent = 'Lade ' + label + '…';
+            loader.load(path, (gltf) => {
+                const item = gltf.scene;
+                const baseBox = new THREE.Box3().setFromObject(baseModel);
+                const baseH = baseBox.max.y - baseBox.min.y;
+                const baseW = baseBox.max.x - baseBox.min.x;
+                const baseCtr = baseBox.getCenter(new THREE.Vector3());
+                // face the avatar front
+                item.rotation.y = (faceMap[path] || 0) * Math.PI;
+                item.updateMatrixWorld(true);
+                // fit into target vertical band (band may exceed avatar; that's ok)
+                const yMin = baseBox.min.y + range.min * baseH;
+                const yMax = baseBox.min.y + range.max * baseH;
+                const b = new THREE.Box3().setFromObject(item);
+                const sz = b.getSize(new THREE.Vector3());
+                const targetH = yMax - yMin;
+                const targetW = Math.max(baseW * 1.25, sz.x * 0.55);
+                const sc = Math.min(targetW / sz.x, targetH / sz.y, 1.5 * baseW / sz.z);
+                item.scale.setScalar(sc);
+                item.updateMatrixWorld(true);
+                const b2 = new THREE.Box3().setFromObject(item);
+                const c2 = b2.getCenter(new THREE.Vector3());
+                item.position.set(baseCtr.x - c2.x, yMin - b2.min.y + 0.004, baseCtr.z - c2.z);
+                item.traverse((child) => {
+                    if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+                });
+                scene.add(item);
+                if (currentRef === 'top') {
+                    if (currentTop) scene.remove(currentTop);
+                    currentTop = item;
+                } else {
+                    if (currentPants) scene.remove(currentPants);
+                    currentPants = item;
+                }
+                // button state within its own panel section
+                btn.closest('#equip-panel').querySelectorAll('button').forEach(b => {
+                    if (b.closest('div') === null) {} // noop
+                });
+                statusEl.textContent = '✓ ' + label + ' ausgerüstet';
+            }, undefined, (err) => {
+                statusEl.textContent = '✗ ' + label + ' nicht gefunden';
+                console.error(err);
+            });
+        }
+        window.equipTop = function(path, btn, faceOverride) {
+            if (currentTop) { scene.remove(currentTop); currentTop = null; }
+            equipGarment(path, btn, faceOverride !== undefined ? {[path]: faceOverride} : TOP_FACE, TOP_RANGE, 'top', 'Oberteil');
+        };
+        window.unequipTop = function(btn) {
+            if (currentTop) { scene.remove(currentTop); currentTop = null; }
+            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            statusEl.textContent = '✓ Kein Oberteil';
+        };
+        window.equipPants = function(path, btn, faceOverride) {
+            if (currentPants) { scene.remove(currentPants); currentPants = null; }
+            equipGarment(path, btn, faceOverride !== undefined ? {[path]: faceOverride} : PANTS_FACE, PANTS_RANGE, 'pants', 'Hose');
+        };
+        window.unequipPants = function(btn) {
+            if (currentPants) { scene.remove(currentPants); currentPants = null; }
+            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            statusEl.textContent = '✓ Keine Hose';
         };
 
         // Render loop
